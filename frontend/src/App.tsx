@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  LayoutDashboard, Users, Shield, Mail, 
-  Activity, Search, Upload, Download, 
+import {
+  LayoutDashboard, Users, Shield, Mail,
+  Activity, Search, Upload, Download,
   CheckCircle, Clock, Lock, LogOut, User,
   FileText, Trash2, AlertCircle, ChevronRight
 } from 'lucide-react';
@@ -107,9 +107,10 @@ const App: React.FC = () => {
   }, [token, api]);
 
   // --- LOGICA FILTRO ---
-  const filteredCandidates = candidates.filter(c => 
-    c.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    c.email.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredCandidates = candidates.filter(c =>
+    c.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.skills?.some(skill => skill.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   // --- RENDER: LOGIN ---
@@ -131,15 +132,15 @@ const App: React.FC = () => {
                 <AlertCircle size={14} /> Credenziali non valide (admin/password).
               </div>
             )}
-            <input 
-              type="text" placeholder="Username" 
+            <input
+              type="text" placeholder="Username"
               className="w-full bg-[#09090b] border border-[#27272a] p-4 rounded-xl text-white outline-none focus:border-indigo-500 transition-all"
-              onChange={e => setLoginData({...loginData, username: e.target.value})}
+              onChange={e => setLoginData({ ...loginData, username: e.target.value })}
             />
-            <input 
-              type="password" placeholder="Password" 
+            <input
+              type="password" placeholder="Password"
               className="w-full bg-[#09090b] border border-[#27272a] p-4 rounded-xl text-white outline-none focus:border-indigo-500 transition-all"
-              onChange={e => setLoginData({...loginData, password: e.target.value})}
+              onChange={e => setLoginData({ ...loginData, password: e.target.value })}
             />
             <button className="w-full bg-indigo-600 hover:bg-indigo-500 p-4 rounded-xl text-white font-bold shadow-lg shadow-indigo-600/20 transition-all">
               Accedi al Database
@@ -164,11 +165,11 @@ const App: React.FC = () => {
 
         <nav className="flex flex-col gap-2">
           {[
-            { id: 'stats', label: 'Dashboard', icon: <LayoutDashboard size={18}/> },
-            { id: 'candidates', label: 'Candidati', icon: <Users size={18}/> },
-            { id: 'gdpr', label: 'Compliance', icon: <Shield size={18}/> },
+            { id: 'stats', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
+            { id: 'candidates', label: 'Candidati', icon: <Users size={18} /> },
+            { id: 'gdpr', label: 'Compliance', icon: <Shield size={18} /> },
           ].map(item => (
-            <button 
+            <button
               key={item.id}
               onClick={() => setView(item.id)}
               className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${view === item.id ? 'bg-indigo-600/10 text-indigo-500 border border-indigo-500/20' : 'text-[#a1a1aa] hover:bg-white/5'}`}
@@ -179,7 +180,7 @@ const App: React.FC = () => {
         </nav>
 
         <button onClick={handleLogout} className="mt-auto p-4 text-red-400 hover:bg-red-500/10 rounded-xl flex items-center gap-3 transition-all">
-          <LogOut size={18}/> Logout
+          <LogOut size={18} /> Logout
         </button>
       </aside>
 
@@ -192,8 +193,8 @@ const App: React.FC = () => {
           {view === 'candidates' && (
             <div className="relative w-80">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#71717a]" size={16} />
-              <input 
-                type="text" placeholder="Filtra candidati..." 
+              <input
+                type="text" placeholder="Nome, email o skill (es. Python)..."
                 className="w-full bg-[#18181b] border border-[#27272a] py-2 pl-10 pr-4 rounded-xl text-sm outline-none focus:border-indigo-500"
                 value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
               />
@@ -210,14 +211,14 @@ const App: React.FC = () => {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={stats.skills_bar}>
                     <XAxis dataKey="name" stroke="#525252" fontSize={10} axisLine={false} tickLine={false} />
-                    <Tooltip cursor={{fill: '#27272a'}} contentStyle={{backgroundColor: '#18181b', border: 'none', borderRadius: '12px'}} />
+                    <Tooltip cursor={{ fill: '#27272a' }} contentStyle={{ backgroundColor: '#18181b', border: 'none', borderRadius: '12px' }} />
                     <Bar dataKey="count" fill="#6366f1" radius={[4, 4, 0, 0]} barSize={35} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>
             <div className="bg-indigo-600 p-8 rounded-3xl shadow-xl flex flex-col justify-center relative overflow-hidden group">
-              <Users className="absolute -right-10 -bottom-10 w-48 h-48 opacity-10 group-hover:scale-110 transition-transform duration-700"/>
+              <Users className="absolute -right-10 -bottom-10 w-48 h-48 opacity-10 group-hover:scale-110 transition-transform duration-700" />
               <span className="text-indigo-100 uppercase text-[10px] font-bold relative z-10 tracking-widest">Talenti Acquisiti</span>
               <div className="text-7xl font-black mt-2 relative z-10">{stats.total_candidates}</div>
             </div>
@@ -244,14 +245,13 @@ const App: React.FC = () => {
                       <div className="text-xs text-[#71717a]">{c.email}</div>
                     </td>
                     <td className="p-6">
-                      <select 
-                        value={c.status} 
+                      <select
+                        value={c.status}
                         onChange={(e) => updateStatus(c.id, e.target.value)}
-                        className={`text-[10px] font-bold uppercase py-1.5 px-3 rounded-full border bg-transparent outline-none cursor-pointer transition-all ${
-                          c.status === 'new' ? 'border-blue-500/40 text-blue-400' : 
+                        className={`text-[10px] font-bold uppercase py-1.5 px-3 rounded-full border bg-transparent outline-none cursor-pointer transition-all ${c.status === 'new' ? 'border-blue-500/40 text-blue-400' :
                           c.status === 'reviewed' ? 'border-yellow-500/40 text-yellow-400' :
-                          'border-emerald-500/40 text-emerald-400'
-                        }`}
+                            'border-emerald-500/40 text-emerald-400'
+                          }`}
                       >
                         <option value="new" className="bg-[#18181b]">Nuovo</option>
                         <option value="reviewed" className="bg-[#18181b]">Revisionato</option>
@@ -261,7 +261,7 @@ const App: React.FC = () => {
                     </td>
                     <td className="p-6">
                       <div className="flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button 
+                        <button
                           onClick={async () => {
                             try {
                               const res = await api.get(`/candidates/${c.id}/download`, { responseType: 'blob' });
@@ -282,7 +282,7 @@ const App: React.FC = () => {
                         >
                           <Download size={16} />
                         </button>
-                        <button 
+                        <button
                           onClick={() => deleteCandidate(c.id)}
                           className="p-2 hover:bg-red-500/20 rounded-lg text-red-500 transition-colors"
                           title="Elimina (GDPR)"
@@ -299,7 +299,7 @@ const App: React.FC = () => {
               </tbody>
             </table>
             {filteredCandidates.length === 0 && (
-                <div className="p-20 text-center text-[#71717a]">Nessun candidato presente.</div>
+              <div className="p-20 text-center text-[#71717a]">Nessun candidato presente.</div>
             )}
           </div>
         )}
@@ -309,20 +309,20 @@ const App: React.FC = () => {
           <div className="bg-[#18181b] border border-[#27272a] rounded-3xl p-10 animate-in fade-in duration-500 shadow-2xl">
             <div className="flex items-center justify-between mb-12">
               <div>
-                <h2 className="text-2xl font-bold flex items-center gap-3"><Shield className="text-emerald-500"/> Registro Audit Privacy</h2>
+                <h2 className="text-2xl font-bold flex items-center gap-3"><Shield className="text-emerald-500" /> Registro Audit Privacy</h2>
                 <p className="text-[#a1a1aa] text-sm mt-1 italic">Conformità ai sensi del Regolamento UE 2016/679</p>
               </div>
               <div className="bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 text-[10px] font-bold uppercase tracking-widest">
                 Sistema Integro
               </div>
             </div>
-            
+
             <div className="space-y-4">
               {candidates.map(c => (
                 <div key={c.id} className="bg-[#09090b] p-6 rounded-2xl border border-[#27272a] flex justify-between items-center group hover:border-indigo-500/40 transition-all">
                   <div className="flex items-center gap-4">
                     <div className="p-3 bg-[#18181b] rounded-xl text-indigo-400 shadow-inner">
-                      <Mail size={20}/>
+                      <Mail size={20} />
                     </div>
                     <div>
                       <div className="text-sm font-bold text-white uppercase tracking-tight">Art. 14 Informative Sent</div>
@@ -331,11 +331,11 @@ const App: React.FC = () => {
                   </div>
                   <div className="flex items-center gap-4">
                     <div className="text-right hidden md:block mr-4">
-                        <span className="block text-[10px] text-[#71717a] font-bold uppercase">Retention</span>
-                        <span className="text-xs text-indigo-400 font-bold">180 giorni</span>
+                      <span className="block text-[10px] text-[#71717a] font-bold uppercase">Retention</span>
+                      <span className="text-xs text-indigo-400 font-bold">180 giorni</span>
                     </div>
                     <div className="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-4 py-2 rounded-full border border-emerald-500/20 flex items-center gap-2">
-                        <CheckCircle size={14}/> Completed
+                      <CheckCircle size={14} /> Completed
                     </div>
                   </div>
                 </div>
