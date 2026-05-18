@@ -36,9 +36,46 @@ def extract_name(text: str) -> str:
 def extract_skills(text: str) -> list:
     """Estrae le skill cercando parole chiave nel testo (Real-time tracking)"""
     keywords = [
-        "Python", "FastAPI", "React", "Docker", "SQL", "PostgreSQL", 
-        "JavaScript", "TypeScript", "Kubernetes", "AWS", "Figma", 
-        "Tailwind", "Node.js", "Java", "Linux", "UI/UX", "Excel", "PHP"
+        # Linguaggi di programmazione
+        "Python", "Java", "JavaScript", "TypeScript", "C++", "C#", "Ruby", "PHP", "Swift", 
+        "Kotlin", "Go", "Rust", "R", "MATLAB", "SQL", "HTML", "CSS",
+
+        # Framework e librerie
+        "React", "Angular", "Vue.js", "Node.js", "Express.js", "Django", "Flask", 
+        "Spring Boot", "ASP.NET", "Laravel", "Symfony", "Ruby on Rails", 
+        "Next.js", "Nuxt.js", "jQuery", "Bootstrap", "Tailwind CSS", "Material-UI",
+        "NumPy", "Pandas", "Scikit-learn", "TensorFlow", "PyTorch", "Keras", 
+        "OpenCV", "Matplotlib", "Seaborn", "D3.js", "Chart.js",
+
+        # Database
+        "MySQL", "PostgreSQL", "MongoDB", "Oracle", "SQL Server", "SQLite", 
+        "Redis", "MariaDB", "Cassandra", "Elasticsearch", "Firebase",
+
+        # Cloud e DevOps
+        "AWS", "Azure", "Google Cloud Platform", "GCP", "Docker", "Kubernetes", 
+        "Terraform", "Ansible", "Jenkins", "Git", "GitHub", "GitLab", "Bitbucket",
+        "CI/CD", "Microservices", "Serverless", "REST API", "GraphQL",
+
+        # Strumenti e metodologie
+        "Jira", "Trello", "Asana", "Confluence", "Agile", "Scrum", "Kanban", 
+        "Lean", "Waterfall", "PRINCE2", "ITIL", "TOGAF",
+
+        # Sistemi operativi
+        "Windows", "Linux", "macOS", "Unix", "Android", "iOS",
+
+        # Tool specifici
+        "Figma", "Adobe XD", "Sketch", "Photoshop", "Illustrator", "InDesign",
+        "Postman", "Swagger", "VsCode", "PyCharm", "IntelliJ", "Android Studio",
+        "Excel", "PowerPoint", "Word", "Outlook",
+
+        # Competenze soft (Italiano)
+        "Problem Solving", "Teamwork", "Leadership", "Comunicazione", "Gestione del tempo",
+        "Flessibilità", "Adattabilità", "Creatività", "Proattività", "Autonomia",
+        "Precisione", "Affidabilità", "Gestione dello stress", "Negoziazione",
+        "Mentoring", "Coaching", "Public Speaking", "Customer Service", "Customer Success",
+        "Sales", "Marketing", "Sviluppo Business", "Project Management",
+        "Gestione Progetti", "Analisi Dati", "Reporting", "Visualizzazione Dati",
+        "Ricerca e Sviluppo", "Innovazione", "UX Writing", "Content Strategy"
     ]
     found_skills = []
     text_lower = text.lower()
