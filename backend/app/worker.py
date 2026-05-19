@@ -48,30 +48,92 @@ celery_app.conf.timezone = "UTC"
 
 @celery_app.task(name="app.worker.ingest_emails_task")
 def ingest_emails_task():
-    """Polling MailHog: raccoglie CV allegati alle email e li processa."""
+    """Polling MailHog con paginazione, error handling per singolo messaggio e decoding robusto."""
     try:
-        response = requests.get("http://mailhog:8025/api/v2/messages", timeout=10)
-        messages = response.json().get("items", [])
-        db = SessionLocal()
-        for msg in messages:
-            if "MIME" in msg and "Parts" in msg["MIME"]:
-                for part in msg["MIME"]["Parts"]:
-                    content_disp = part.get("Headers", {}).get("Content-Disposition", [""])[0]
-                    if "filename=" in content_disp:
-                        filename = content_disp.split("filename=")[1].strip('"')
-                        if filename.endswith((".pdf", ".docx")):
-                            body_raw = part.get("Body", "")
-                            try:
-                                file_bytes = base64.b64decode(body_raw)
-                            except Exception:
-                                file_bytes = body_raw.encode()
+        limit = 100   # quanti messaggi per pagina
+        start = 0
+        processed = 0
 
-                            candidate = process_cv_file(file_bytes, filename, db)
-                            send_art14_email_task.delay(candidate.email, candidate.name)
-                            requests.delete(f"http://mailhog:8025/api/v1/messages/{msg['ID']}")
-        db.close()
+        while True:
+            url = f"http://mailhog:8025/api/v2/messages?limit={limit}&start={start}"
+            response = requests.get(url, timeout=10)
+            if response.status_code != 200:
+                print(f"MailHog API error: {response.status_code}")
+                break
+
+            data = response.json()
+            messages = data.get("items", [])
+            if not messages:
+                break   # nessun altro messaggio
+
+            for msg in messages:
+                # Estrai l'ID del messaggio (MailHog usa "ID" in maiuscolo nella v2)
+                msg_id = msg.get("ID")
+                if not msg_id:
+                    continue
+
+                # Crea una sessione DB fresca per ogni CV
+                db = SessionLocal()
+                try:
+                    # Cerca allegati
+                    mime = msg.get("MIME", {})
+                    parts = mime.get("Parts", [])
+                    found = False
+
+                    for part in parts:
+                        headers = part.get("Headers", {})
+                        content_disposition = headers.get("Content-Disposition", [""])[0]
+                        if "filename=" in content_disposition:
+                            filename = content_disposition.split("filename=")[1].strip('"')
+                            if filename.endswith((".pdf", ".docx")):
+                                # Decodifica robusta del body
+                                body = part.get("Body", "")
+                                transfer_encoding = headers.get("Content-Transfer-Encoding", [""])[0].lower()
+                                file_bytes = None
+
+                                if transfer_encoding == "base64":
+                                    try:
+                                        file_bytes = base64.b64decode(body)
+                                    except Exception as e:
+                                        print(f"Errore decodifica base64 per {filename}: {e}")
+                                        continue
+                                else:
+                                    # Assume plain text (ma per file binari non funziona, meglio tentare base64 comunque)
+                                    try:
+                                        file_bytes = base64.b64decode(body)
+                                    except:
+                                        file_bytes = body.encode()
+
+                                if file_bytes:
+                                    # Processa il CV
+                                    candidate = process_cv_file(file_bytes, filename, db)
+                                    # Invia email GDPR in background (già dentro process_cv_file? no, lo facciamo qui)
+                                    send_art14_email_task.delay(candidate.email, candidate.name or "Candidato")
+                                    found = True
+                                    break   # esci dai parts, abbiamo già preso l'allegato
+
+                    if found:
+                        # Elimina il messaggio solo se processato con successo
+                        requests.delete(f"http://mailhog:8025/api/v1/messages/{msg_id}")
+                        processed += 1
+                    else:
+                        print(f"Nessun allegato CV in messaggio {msg_id}")
+
+                except Exception as e:
+                    print(f"ERRORE processando messaggio {msg_id}: {e}")
+                    # Non cancellare il messaggio in caso di errore, verrà ripreso al prossimo polling
+                finally:
+                    db.close()
+
+            # Passa alla pagina successiva se il numero di messaggi è uguale al limite
+            if len(messages) < limit:
+                break
+            start += limit
+
+        print(f"Worker: elaborati {processed} nuovi CV")
+
     except Exception as e:
-        print(f"Worker Error (ingest_emails_task): {e}")
+        print(f"Errore grave in ingest_emails_task: {e}")
 
 
 @celery_app.task(name="app.worker.send_art14_email_task")

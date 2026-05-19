@@ -30,7 +30,7 @@ interface DashboardStats {
 const API_BASE = "http://localhost:8000";
 
 const App: React.FC = () => {
-  // --- STATO ---
+  // --- STATO PRINCIPALE ---
   const [token, setToken] = useState<string | null>(localStorage.getItem('flux_token'));
   const [view, setView] = useState('stats');
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -40,6 +40,16 @@ const App: React.FC = () => {
   const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState(false);
 
+  // --- STATO PER SELEZIONE MULTIPLA ED ELIMINAZIONE ---
+  const [selectedCandidates, setSelectedCandidates] = useState<Set<number>>(new Set());
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // --- STATO PER DRAG & DROP UPLOAD ---
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState<{ name: string; status: 'pending' | 'uploading' | 'success' | 'error' }[]>([]);
+
+  // --- SKILL RICHIESTE PER GAP ANALYSIS (ESEMPIO) ---
   const [requiredSkills] = useState([
     { name: 'Python', target: 8 },
     { name: 'React', target: 6 },
@@ -54,7 +64,7 @@ const App: React.FC = () => {
     headers: token ? { Authorization: `Bearer ${token}` } : {}
   }), [token]);
 
-  // --- FUNZIONI DI GESTIONE ---
+  // --- FUNZIONI DI AUTENTICAZIONE E DATI ---
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(false);
@@ -90,6 +100,7 @@ const App: React.FC = () => {
     }
   };
 
+  // --- CRUD ---
   const updateStatus = async (id: number, newStatus: string) => {
     try {
       await api.patch(`/candidates/${id}/status`, { status: newStatus });
@@ -99,28 +110,108 @@ const App: React.FC = () => {
     }
   };
 
-  const deleteCandidate = async (id: number) => {
-    if (!window.confirm("Eliminare definitivamente il candidato e tutti i suoi dati (GDPR)?")) return;
+  const deleteSingleCandidate = async (id: number) => {
     try {
       await api.delete(`/candidates/${id}`);
-      fetchData();
     } catch (err) {
-      alert("Errore durante l'eliminazione.");
+      throw err;
     }
   };
 
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 15000);
-    return () => clearInterval(interval);
-  }, [token, api]);
+  const handleDeleteSelected = async () => {
+    setIsDeleting(true);
+    const ids = Array.from(selectedCandidates);
+    try {
+      await Promise.all(ids.map(id => deleteSingleCandidate(id)));
+      await fetchData();
+      setSelectedCandidates(new Set());
+      setShowDeleteModal(false);
+    } catch (err) {
+      alert("Errore durante l'eliminazione di alcuni candidati.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
-  // --- LOGICA FILTRI PER LISTA CANDIDATI ---
+  // --- SELEZIONE MULTIPLA ---
+  const toggleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const allIds = filteredCandidates.map(c => c.id);
+      setSelectedCandidates(new Set(allIds));
+    } else {
+      setSelectedCandidates(new Set());
+    }
+  };
+
+  const toggleSelectOne = (id: number, checked: boolean) => {
+    const newSet = new Set(selectedCandidates);
+    if (checked) newSet.add(id);
+    else newSet.delete(id);
+    setSelectedCandidates(newSet);
+  };
+
+  // --- UPLOAD CON DRAG & DROP ---
+  const uploadCV = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      await api.post('/upload-cv', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return { success: true };
+    } catch (err) {
+      console.error(`Errore upload ${file.name}:`, err);
+      return { success: false };
+    }
+  };
+
+  const uploadFiles = async (files: File[]) => {
+    const validFiles = files.filter(f => f.name.endsWith('.pdf') || f.name.endsWith('.docx'));
+    if (validFiles.length === 0) {
+      alert('Sono accettati solo file PDF o DOCX');
+      return;
+    }
+
+    const newUploads = validFiles.map(f => ({ name: f.name, status: 'pending' as const }));
+    setUploadingFiles(prev => [...prev, ...newUploads]);
+
+    for (const file of validFiles) {
+      setUploadingFiles(prev =>
+        prev.map(u => u.name === file.name ? { ...u, status: 'uploading' } : u)
+      );
+      const result = await uploadCV(file);
+      setUploadingFiles(prev =>
+        prev.map(u =>
+          u.name === file.name ? { ...u, status: result.success ? 'success' : 'error' } : u
+        )
+      );
+    }
+    await fetchData();
+    setTimeout(() => {
+      setUploadingFiles(prev => prev.filter(u => u.status !== 'success' && u.status !== 'error'));
+    }, 4000);
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files);
+    await uploadFiles(files);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  // --- FILTRI PER SKILL E TESTO ---
   const availableSkills = useMemo(() => {
     const skillSet = new Set<string>();
-    candidates.forEach(c => {
-      c.skills?.forEach(skill => skillSet.add(skill));
-    });
+    candidates.forEach(c => c.skills?.forEach(skill => skillSet.add(skill)));
     return Array.from(skillSet).sort();
   }, [candidates]);
 
@@ -133,6 +224,7 @@ const App: React.FC = () => {
   const resetFilters = () => {
     setSearchTerm("");
     setSelectedSkills([]);
+    setSelectedCandidates(new Set());
   };
 
   const filteredCandidates = candidates.filter(c => {
@@ -145,7 +237,17 @@ const App: React.FC = () => {
     return c.skills?.some(skill => selectedSkills.includes(skill));
   });
 
-  // --- RENDER: LOGIN ---
+  const allSelected = filteredCandidates.length > 0 && filteredCandidates.every(c => selectedCandidates.has(c.id));
+  const someSelected = selectedCandidates.size > 0;
+
+  // --- INIT E POLLING ---
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 15000);
+    return () => clearInterval(interval);
+  }, [token, api]);
+
+  // --- RENDER LOGIN ---
   if (!token) {
     return (
       <div className="h-screen w-full bg-[#09090b] flex items-center justify-center p-4 font-sans antialiased">
@@ -182,7 +284,7 @@ const App: React.FC = () => {
     );
   }
 
-  // --- RENDER: DASHBOARD PRINCIPALE ---
+  // --- RENDER DASHBOARD PRINCIPALE ---
   return (
     <div className="flex h-screen bg-[#09090b] text-[#fafafa] font-sans overflow-hidden antialiased">
       {/* Sidebar */}
@@ -224,13 +326,23 @@ const App: React.FC = () => {
             <p className="text-[#a1a1aa] mt-1">Gestione Talenti Enterprise</p>
           </div>
           {view === 'candidates' && (
-            <div className="relative w-80">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#71717a]" size={16} />
-              <input
-                type="text" placeholder="Nome, email o skill (es. Python)..."
-                className="w-full bg-[#18181b] border border-[#27272a] py-2 pl-10 pr-4 rounded-xl text-sm outline-none focus:border-indigo-500"
-                value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-              />
+            <div className="flex gap-4">
+              <div className="relative w-80">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#71717a]" size={16} />
+                <input
+                  type="text" placeholder="Nome, email o skill (es. Python)..."
+                  className="w-full bg-[#18181b] border border-[#27272a] py-2 pl-10 pr-4 rounded-xl text-sm outline-none focus:border-indigo-500"
+                  value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+                />
+              </div>
+              {someSelected && (
+                <button
+                  onClick={() => setShowDeleteModal(true)}
+                  className="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-xl flex items-center gap-2 transition-all border border-red-500/30"
+                >
+                  <Trash2 size={16} /> Elimina selezionati ({selectedCandidates.size})
+                </button>
+              )}
             </div>
           )}
         </header>
@@ -276,9 +388,66 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* ========= VIEW 2: LISTA CANDIDATI (con checkbox skill) ========= */}
+        {/* ========= VIEW 2: CANDIDATI (con drag&drop, checkbox skill, selezione multipla) ========= */}
         {view === 'candidates' && (
           <div className="space-y-6">
+            {/* Drag & Drop Area */}
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`relative border-2 border-dashed rounded-2xl p-8 transition-all cursor-pointer text-center ${
+                isDragging
+                  ? 'border-indigo-500 bg-indigo-500/10'
+                  : 'border-[#27272a] bg-[#18181b]/50 hover:border-indigo-500/50'
+              }`}
+            >
+              <input
+                type="file"
+                id="fileInput"
+                multiple
+                accept=".pdf,.docx"
+                className="hidden"
+                onChange={async (e) => {
+                  if (e.target.files) {
+                    const files = Array.from(e.target.files);
+                    await uploadFiles(files);
+                    e.target.value = '';
+                  }
+                }}
+              />
+              <div className="flex flex-col items-center gap-3">
+                <Upload size={40} className="text-indigo-400" />
+                <div className="text-sm font-medium text-white">Trascina qui i CV (PDF o DOCX)</div>
+                <div className="text-xs text-[#71717a]">
+                  oppure{' '}
+                  <label htmlFor="fileInput" className="text-indigo-400 cursor-pointer hover:underline">
+                    seleziona dal computer
+                  </label>
+                </div>
+                <div className="text-[10px] text-[#71717a] mt-1">Supporto upload multiplo</div>
+              </div>
+            </div>
+
+            {/* Feedback upload */}
+            {uploadingFiles.length > 0 && (
+              <div className="bg-[#18181b] rounded-xl border border-[#27272a] p-4 space-y-2">
+                <div className="text-xs font-bold text-[#a1a1aa] uppercase tracking-wider">Upload in corso</div>
+                {uploadingFiles.map(file => (
+                  <div key={file.name} className="flex items-center justify-between text-sm">
+                    <span className="truncate max-w-[200px]">{file.name}</span>
+                    <span className="text-xs">
+                      {file.status === 'pending' && <span className="text-yellow-400">📤 in coda</span>}
+                      {file.status === 'uploading' && <span className="text-blue-400 animate-pulse">⏳ caricamento...</span>}
+                      {file.status === 'success' && <span className="text-emerald-400">✅ completato</span>}
+                      {file.status === 'error' && <span className="text-red-400">❌ errore</span>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Filtri skill */}
             {availableSkills.length > 0 && (
               <div className="bg-[#18181b] border border-[#27272a] rounded-2xl p-5">
                 <div className="flex items-center justify-between mb-4">
@@ -306,10 +475,19 @@ const App: React.FC = () => {
               </div>
             )}
 
+            {/* Tabella candidati con checkbox */}
             <div className="bg-[#18181b] rounded-3xl border border-[#27272a] overflow-hidden shadow-2xl">
               <table className="w-full text-left">
                 <thead className="bg-[#27272a]/50 text-[#a1a1aa] text-[10px] uppercase tracking-widest font-bold">
                   <tr>
+                    <th className="p-4 w-8">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 rounded border-[#27272a] bg-[#09090b] text-indigo-600 focus:ring-indigo-500"
+                        checked={allSelected}
+                        onChange={(e) => toggleSelectAll(e.target.checked)}
+                      />
+                    </th>
                     <th className="p-6">Nominativo</th>
                     <th className="p-6">Stato Pipeline</th>
                     <th className="p-6">Azioni</th>
@@ -319,6 +497,14 @@ const App: React.FC = () => {
                 <tbody className="divide-y divide-[#27272a]">
                   {filteredCandidates.map(c => (
                     <tr key={c.id} className="hover:bg-white/[0.02] transition-colors group">
+                      <td className="p-4 w-8">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 rounded border-[#27272a] bg-[#09090b] text-indigo-600 focus:ring-indigo-500"
+                          checked={selectedCandidates.has(c.id)}
+                          onChange={(e) => toggleSelectOne(c.id, e.target.checked)}
+                        />
+                      </td>
                       <td className="p-6">
                         <div className="font-bold text-white">{c.name || 'In attesa di parsing...'}</div>
                         <div className="text-xs text-[#71717a]">{c.email}</div>
@@ -338,7 +524,7 @@ const App: React.FC = () => {
                           <option value="shortlisted" className="bg-[#18181b]">Selezionato</option>
                           <option value="rejected" className="bg-[#18181b]">Scartato</option>
                         </select>
-                      </td>
+                       </td>
                       <td className="p-6">
                         <div className="flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button onClick={async () => {
@@ -356,11 +542,14 @@ const App: React.FC = () => {
                           }} className="p-2 hover:bg-indigo-500/20 rounded-lg text-indigo-400 transition-colors" title="Scarica CV">
                             <Download size={16} />
                           </button>
-                          <button onClick={() => deleteCandidate(c.id)} className="p-2 hover:bg-red-500/20 rounded-lg text-red-500 transition-colors" title="Elimina (GDPR)">
+                          <button onClick={() => {
+                            setSelectedCandidates(new Set([c.id]));
+                            setShowDeleteModal(true);
+                          }} className="p-2 hover:bg-red-500/20 rounded-lg text-red-500 transition-colors" title="Elimina (GDPR)">
                             <Trash2 size={16} />
                           </button>
                         </div>
-                      </td>
+                       </td>
                       <td className="p-6 text-right text-xs font-mono text-[#71717a]">{new Date(c.created_at).toLocaleDateString()}</td>
                     </tr>
                   ))}
@@ -369,6 +558,32 @@ const App: React.FC = () => {
               {filteredCandidates.length === 0 && (
                 <div className="p-20 text-center text-[#71717a]">Nessun candidato corrisponde ai filtri selezionati.</div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ========= MODALE CONFERMA ELIMINAZIONE ========= */}
+        {showDeleteModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+            <div className="bg-[#18181b] border border-[#27272a] rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl animate-in fade-in zoom-in duration-200">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-500/20 rounded-full">
+                  <Trash2 className="text-red-400" size={24} />
+                </div>
+                <h3 className="text-xl font-bold text-white">Conferma eliminazione</h3>
+              </div>
+              <p className="text-[#a1a1aa] mb-6">
+                Sei sicuro di voler eliminare <span className="font-bold text-white">{selectedCandidates.size}</span> candidato{selectedCandidates.size !== 1 && 'i'}?
+                {selectedCandidates.size > 0 && (
+                  <span className="block text-xs text-red-400 mt-2">Questa operazione è irreversibile (GDPR).</span>
+                )}
+              </p>
+              <div className="flex justify-end gap-3">
+                <button onClick={() => setShowDeleteModal(false)} className="px-4 py-2 rounded-xl bg-[#27272a] hover:bg-[#3f3f46] text-white transition" disabled={isDeleting}>Annulla</button>
+                <button onClick={handleDeleteSelected} className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-medium transition flex items-center gap-2" disabled={isDeleting}>
+                  {isDeleting ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Eliminazione...</> : <>Conferma eliminazione</>}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -472,7 +687,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* ========= VIEW 6: COLLOQUI ========= */}
+        {/* ========= VIEW 6: COLLOQUI (MOCKUP) ========= */}
         {view === 'calendar' && (
           <div className="bg-[#18181b] rounded-3xl border border-[#27272a] p-8">
             <div className="flex justify-between items-center mb-8">
