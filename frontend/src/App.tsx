@@ -4,7 +4,8 @@ import {
   Activity, Search, Upload, Download,
   CheckCircle, Clock, Lock, LogOut, User,
   FileText, Trash2, AlertCircle, ChevronRight, X,
-  GitBranch, TrendingUp, FileBarChart, Calendar, Plus
+  GitBranch, TrendingUp, FileBarChart, Calendar, Plus,
+  ChevronLeft
 } from 'lucide-react';
 import { BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, Cell, PieChart, Pie } from 'recharts';
 import axios from 'axios';
@@ -27,7 +28,91 @@ interface DashboardStats {
   status_distribution: Record<string, number>;
 }
 
+interface Interview {
+  id: number;
+  candidateId: number;
+  candidateName: string;
+  candidateEmail: string;
+  date: string;
+  time: string;
+  type: string;
+}
+
 const API_BASE = "http://localhost:8000";
+
+// --- COMPONENTE PAGINAZIONE RIUTILIZZABILE ---
+interface PaginationProps {
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  totalItems: number;
+  itemsPerPage: number;
+}
+
+const Pagination: React.FC<PaginationProps> = ({ currentPage, totalPages, onPageChange, totalItems, itemsPerPage }) => {
+  if (totalPages <= 1) return null;
+
+  const startItem = (currentPage - 1) * itemsPerPage + 1;
+  const endItem = Math.min(currentPage * itemsPerPage, totalItems);
+
+  // Genera i numeri di pagina da mostrare
+  const getPageNumbers = () => {
+    const pages: (number | '...')[] = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      if (currentPage > 3) pages.push('...');
+      for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) {
+        pages.push(i);
+      }
+      if (currentPage < totalPages - 2) pages.push('...');
+      pages.push(totalPages);
+    }
+    return pages;
+  };
+
+  return (
+    <div className="flex items-center justify-between mt-6 px-2">
+      <span className="text-xs text-[#71717a] font-mono">
+        {startItem}–{endItem} di {totalItems} risultati
+      </span>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          className="p-2 rounded-lg text-[#a1a1aa] hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        {getPageNumbers().map((page, idx) =>
+          page === '...' ? (
+            <span key={`dots-${idx}`} className="px-2 text-[#71717a] text-sm">…</span>
+          ) : (
+            <button
+              key={page}
+              onClick={() => onPageChange(page as number)}
+              className={`w-9 h-9 rounded-xl text-sm font-medium transition-all ${
+                currentPage === page
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20'
+                  : 'text-[#a1a1aa] hover:bg-white/5'
+              }`}
+            >
+              {page}
+            </button>
+          )
+        )}
+        <button
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          className="p-2 rounded-lg text-[#a1a1aa] hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        >
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </div>
+  );
+};
 
 const App: React.FC = () => {
   // --- STATO PRINCIPALE ---
@@ -48,6 +133,34 @@ const App: React.FC = () => {
   // --- STATO PER DRAG & DROP UPLOAD ---
   const [isDragging, setIsDragging] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<{ name: string; status: 'pending' | 'uploading' | 'success' | 'error' }[]>([]);
+
+  // --- PAGINAZIONE CANDIDATI ---
+  const [candidatesPage, setCandidatesPage] = useState(1);
+  const CANDIDATES_PER_PAGE = 10;
+
+  // --- PAGINAZIONE COLLOQUI ---
+  const [interviewsPage, setInterviewsPage] = useState(1);
+  const INTERVIEWS_PER_PAGE = 5;
+
+  // --- STATO COLLOQUI MANUALI ---
+  const [manualInterviews, setManualInterviews] = useState<Interview[]>([]);
+  const [showNewInterviewModal, setShowNewInterviewModal] = useState(false);
+  const [newInterviewForm, setNewInterviewForm] = useState({
+    candidateId: '',
+    date: '',
+    time: '',
+    type: 'Colloquio tecnico',
+  });
+  const [newInterviewError, setNewInterviewError] = useState('');
+
+  // --- FILTRI COLLOQUI ---
+  const [interviewSearchTerm, setInterviewSearchTerm] = useState('');
+  const [interviewTypeFilter, setInterviewTypeFilter] = useState('');
+
+  // --- CANCELLAZIONE COLLOQUI ---
+  const [deletedMockInterviewIds, setDeletedMockInterviewIds] = useState<Set<number>>(new Set());
+  const [showDeleteInterviewModal, setShowDeleteInterviewModal] = useState(false);
+  const [interviewToDelete, setInterviewToDelete] = useState<Interview | null>(null);
 
   // --- SKILL RICHIESTE PER GAP ANALYSIS (ESEMPIO) ---
   const [requiredSkills] = useState([
@@ -136,7 +249,7 @@ const App: React.FC = () => {
   // --- SELEZIONE MULTIPLA ---
   const toggleSelectAll = (checked: boolean) => {
     if (checked) {
-      const allIds = filteredCandidates.map(c => c.id);
+      const allIds = paginatedCandidates.map(c => c.id);
       setSelectedCandidates(new Set(allIds));
     } else {
       setSelectedCandidates(new Set());
@@ -219,12 +332,14 @@ const App: React.FC = () => {
     setSelectedSkills(prev =>
       prev.includes(skill) ? prev.filter(s => s !== skill) : [...prev, skill]
     );
+    setCandidatesPage(1); // reset pagina al cambio filtro
   };
 
   const resetFilters = () => {
     setSearchTerm("");
     setSelectedSkills([]);
     setSelectedCandidates(new Set());
+    setCandidatesPage(1);
   };
 
   const filteredCandidates = candidates.filter(c => {
@@ -237,8 +352,102 @@ const App: React.FC = () => {
     return c.skills?.some(skill => selectedSkills.includes(skill));
   });
 
-  const allSelected = filteredCandidates.length > 0 && filteredCandidates.every(c => selectedCandidates.has(c.id));
+  // --- PAGINAZIONE APPLICATA ---
+  const totalCandidatePages = Math.ceil(filteredCandidates.length / CANDIDATES_PER_PAGE);
+  const paginatedCandidates = filteredCandidates.slice(
+    (candidatesPage - 1) * CANDIDATES_PER_PAGE,
+    candidatesPage * CANDIDATES_PER_PAGE
+  );
+
+  // --- AGGIUNGI NUOVO COLLOQUIO ---
+  const handleAddInterview = () => {
+    setNewInterviewError('');
+    if (!newInterviewForm.candidateId) {
+      setNewInterviewError('Seleziona un candidato.');
+      return;
+    }
+    if (!newInterviewForm.date) {
+      setNewInterviewError('Inserisci una data.');
+      return;
+    }
+    if (!newInterviewForm.time) {
+      setNewInterviewError("Inserisci un'ora.");
+      return;
+    }
+    const candidate = candidates.find(c => c.id === Number(newInterviewForm.candidateId));
+    if (!candidate) {
+      setNewInterviewError('Candidato non trovato.');
+      return;
+    }
+    const dateObj = new Date(`${newInterviewForm.date}T${newInterviewForm.time}`);
+    const formatted = dateObj.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' }) + ', ' + newInterviewForm.time;
+    const newInterview: Interview = {
+      id: Date.now(),
+      candidateId: candidate.id,
+      candidateName: candidate.name || 'Candidato senza nome',
+      candidateEmail: candidate.email,
+      date: newInterviewForm.date,
+      time: formatted,
+      type: newInterviewForm.type,
+    };
+    setManualInterviews(prev => [...prev, newInterview]);
+    setShowNewInterviewModal(false);
+    setNewInterviewForm({ candidateId: '', date: '', time: '', type: 'Colloquio tecnico' });
+    setNewInterviewError('');
+  };
+
+  // --- CANCELLA COLLOQUIO ---
+  const handleDeleteInterview = () => {
+    if (!interviewToDelete) return;
+    if (interviewToDelete.id > 0) {
+      // colloquio manuale: rimuovilo dall'array
+      setManualInterviews(prev => prev.filter(i => i.id !== interviewToDelete.id));
+    } else {
+      // colloquio mockup: traccia l'id come eliminato
+      setDeletedMockInterviewIds(prev => { const next = new Set(Array.from(prev)); next.add(interviewToDelete.id); return next; });
+    }
+    setShowDeleteInterviewModal(false);
+    setInterviewToDelete(null);
+  };
+
+  // Dati colloqui (mockup basato sui candidati + colloqui aggiunti manualmente)
+  const mockInterviews = candidates.slice(0, Math.min(candidates.length, 20)).map((c, idx) => ({
+    id: c.id * -1,
+    candidateId: c.id,
+    candidateName: c.name || 'Candidato senza nome',
+    candidateEmail: c.email,
+    date: '',
+    time: idx % 3 === 0 ? 'Oggi, 15:30' : idx % 3 === 1 ? 'Domani, 10:00' : '12 Mag, 14:00',
+    type: idx % 2 === 0 ? 'Colloquio tecnico' : 'Colloquio HR',
+  }));
+  const allInterviews = [...manualInterviews, ...mockInterviews.filter(m => !deletedMockInterviewIds.has(m.id))];
+
+  const filteredInterviews = allInterviews.filter(i => {
+    const matchesSearch = interviewSearchTerm === '' ||
+      i.candidateName.toLowerCase().includes(interviewSearchTerm.toLowerCase()) ||
+      i.candidateEmail.toLowerCase().includes(interviewSearchTerm.toLowerCase());
+    const matchesType = interviewTypeFilter === '' || i.type === interviewTypeFilter;
+    return matchesSearch && matchesType;
+  });
+
+  const totalInterviewPages = Math.ceil(filteredInterviews.length / INTERVIEWS_PER_PAGE);
+  const paginatedInterviews = filteredInterviews.slice(
+    (interviewsPage - 1) * INTERVIEWS_PER_PAGE,
+    interviewsPage * INTERVIEWS_PER_PAGE
+  );
+
+  const allSelected = paginatedCandidates.length > 0 && paginatedCandidates.every(c => selectedCandidates.has(c.id));
   const someSelected = selectedCandidates.size > 0;
+
+  // Reset pagina quando cambia la ricerca
+  useEffect(() => {
+    setCandidatesPage(1);
+  }, [searchTerm]);
+
+  // Reset pagina colloqui quando cambiano i filtri
+  useEffect(() => {
+    setInterviewsPage(1);
+  }, [interviewSearchTerm, interviewTypeFilter]);
 
   // --- INIT E POLLING ---
   useEffect(() => {
@@ -256,7 +465,7 @@ const App: React.FC = () => {
             <div className="h-14 w-14 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20 mx-auto mb-4 text-white">
               <Shield size={28} />
             </div>
-            <h1 className="text-3xl font-bold text-white tracking-tight">FluxHR Access</h1>
+            <h1 className="text-3xl font-bold text-white tracking-tight">humflow Access</h1>
             <p className="text-[#a1a1aa] mt-2">Protocollo Sicurezza Talent v3.0</p>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
@@ -293,7 +502,7 @@ const App: React.FC = () => {
           <div className="h-9 w-9 bg-indigo-600 rounded-xl flex items-center justify-center text-white">
             <Activity size={20} />
           </div>
-          <span className="text-xl font-bold tracking-tight">FluxHR</span>
+          <span className="text-xl font-bold tracking-tight">humflow</span>
         </div>
         <nav className="flex flex-col gap-2">
           {[
@@ -388,7 +597,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* ========= VIEW 2: CANDIDATI (con drag&drop, checkbox skill, selezione multipla) ========= */}
+        {/* ========= VIEW 2: CANDIDATI con PAGINAZIONE ========= */}
         {view === 'candidates' && (
           <div className="space-y-6">
             {/* Drag & Drop Area */}
@@ -475,7 +684,7 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {/* Tabella candidati con checkbox */}
+            {/* Tabella candidati con checkbox + PAGINAZIONE */}
             <div className="bg-[#18181b] rounded-3xl border border-[#27272a] overflow-hidden shadow-2xl">
               <table className="w-full text-left">
                 <thead className="bg-[#27272a]/50 text-[#a1a1aa] text-[10px] uppercase tracking-widest font-bold">
@@ -495,7 +704,7 @@ const App: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#27272a]">
-                  {filteredCandidates.map(c => (
+                  {paginatedCandidates.map(c => (
                     <tr key={c.id} className="hover:bg-white/[0.02] transition-colors group">
                       <td className="p-4 w-8">
                         <input
@@ -558,6 +767,19 @@ const App: React.FC = () => {
               {filteredCandidates.length === 0 && (
                 <div className="p-20 text-center text-[#71717a]">Nessun candidato corrisponde ai filtri selezionati.</div>
               )}
+
+              {/* PAGINAZIONE CANDIDATI */}
+              {filteredCandidates.length > 0 && (
+                <div className="px-6 pb-6">
+                  <Pagination
+                    currentPage={candidatesPage}
+                    totalPages={totalCandidatePages}
+                    onPageChange={setCandidatesPage}
+                    totalItems={filteredCandidates.length}
+                    itemsPerPage={CANDIDATES_PER_PAGE}
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -582,6 +804,114 @@ const App: React.FC = () => {
                 <button onClick={() => setShowDeleteModal(false)} className="px-4 py-2 rounded-xl bg-[#27272a] hover:bg-[#3f3f46] text-white transition" disabled={isDeleting}>Annulla</button>
                 <button onClick={handleDeleteSelected} className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-medium transition flex items-center gap-2" disabled={isDeleting}>
                   {isDeleting ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Eliminazione...</> : <>Conferma eliminazione</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========= MODALE NUOVO COLLOQUIO ========= */}
+        {showNewInterviewModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+            <div className="bg-[#18181b] border border-[#27272a] rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-indigo-500/20 rounded-full">
+                    <Calendar className="text-indigo-400" size={22} />
+                  </div>
+                  <h3 className="text-xl font-bold text-white">Nuovo Colloquio</h3>
+                </div>
+                <button
+                  onClick={() => setShowNewInterviewModal(false)}
+                  className="p-1.5 hover:bg-white/10 rounded-lg transition text-[#a1a1aa]"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {/* Selezione candidato */}
+                <div>
+                  <label className="block text-xs font-bold text-[#a1a1aa] uppercase tracking-wider mb-2">
+                    Candidato
+                  </label>
+                  <select
+                    value={newInterviewForm.candidateId}
+                    onChange={e => setNewInterviewForm({ ...newInterviewForm, candidateId: e.target.value })}
+                    className="w-full bg-[#09090b] border border-[#27272a] text-white p-3 rounded-xl text-sm outline-none focus:border-indigo-500 transition-all"
+                  >
+                    <option value="" className="bg-[#09090b] text-[#71717a]">— Seleziona un candidato —</option>
+                    {candidates.map(c => (
+                      <option key={c.id} value={c.id} className="bg-[#09090b]">
+                        {c.name || c.email}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Data */}
+                <div>
+                  <label className="block text-xs font-bold text-[#a1a1aa] uppercase tracking-wider mb-2">
+                    Data
+                  </label>
+                  <input
+                    type="date"
+                    value={newInterviewForm.date}
+                    onChange={e => setNewInterviewForm({ ...newInterviewForm, date: e.target.value })}
+                    className="w-full bg-[#09090b] border border-[#27272a] text-white p-3 rounded-xl text-sm outline-none focus:border-indigo-500 transition-all"
+                  />
+                </div>
+
+                {/* Ora */}
+                <div>
+                  <label className="block text-xs font-bold text-[#a1a1aa] uppercase tracking-wider mb-2">
+                    Ora
+                  </label>
+                  <input
+                    type="time"
+                    value={newInterviewForm.time}
+                    onChange={e => setNewInterviewForm({ ...newInterviewForm, time: e.target.value })}
+                    className="w-full bg-[#09090b] border border-[#27272a] text-white p-3 rounded-xl text-sm outline-none focus:border-indigo-500 transition-all"
+                  />
+                </div>
+
+                {/* Tipo di colloquio */}
+                <div>
+                  <label className="block text-xs font-bold text-[#a1a1aa] uppercase tracking-wider mb-2">
+                    Tipo di colloquio
+                  </label>
+                  <select
+                    value={newInterviewForm.type}
+                    onChange={e => setNewInterviewForm({ ...newInterviewForm, type: e.target.value })}
+                    className="w-full bg-[#09090b] border border-[#27272a] text-white p-3 rounded-xl text-sm outline-none focus:border-indigo-500 transition-all"
+                  >
+                    <option value="Colloquio tecnico" className="bg-[#09090b]">Colloquio tecnico</option>
+                    <option value="Colloquio HR" className="bg-[#09090b]">Colloquio HR</option>
+                    <option value="Colloquio conoscitivo" className="bg-[#09090b]">Colloquio conoscitivo</option>
+                    <option value="Colloquio finale" className="bg-[#09090b]">Colloquio finale</option>
+                  </select>
+                </div>
+
+                {/* Errore di validazione */}
+                {newInterviewError && (
+                  <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-xs flex items-center gap-2">
+                    <AlertCircle size={14} /> {newInterviewError}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={() => setShowNewInterviewModal(false)}
+                  className="px-4 py-2 rounded-xl bg-[#27272a] hover:bg-[#3f3f46] text-white transition"
+                >
+                  Annulla
+                </button>
+                <button
+                  onClick={handleAddInterview}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition flex items-center gap-2"
+                >
+                  <Plus size={16} /> Aggiungi colloquio
                 </button>
               </div>
             </div>
@@ -687,21 +1017,143 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* ========= VIEW 6: COLLOQUI (MOCKUP) ========= */}
+        {/* ========= VIEW 6: COLLOQUI con FILTRI, CANCELLAZIONE e PAGINAZIONE ========= */}
         {view === 'calendar' && (
           <div className="bg-[#18181b] rounded-3xl border border-[#27272a] p-8">
-            <div className="flex justify-between items-center mb-8">
-              <h2 className="text-2xl font-bold flex items-center gap-2"><Calendar className="text-indigo-400" size={24} />Prossimi Colloqui</h2>
-              <button className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-xl flex items-center gap-2 transition"><Plus size={16} /> Nuovo colloquio</button>
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h2 className="text-2xl font-bold flex items-center gap-2">
+                  <Calendar className="text-indigo-400" size={24} />Prossimi Colloqui
+                </h2>
+                <p className="text-[#a1a1aa] text-sm mt-1">
+                  {filteredInterviews.length > 0
+                    ? `${filteredInterviews.length} colloqui${allInterviews.length !== filteredInterviews.length ? ` su ${allInterviews.length}` : ' programmati'}`
+                    : 'Nessun colloquio corrisponde ai filtri'}
+                </p>
+              </div>
+              <button onClick={() => { setNewInterviewForm({ candidateId: '', date: '', time: '', type: 'Colloquio tecnico' }); setNewInterviewError(''); setShowNewInterviewModal(true); }} className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-xl flex items-center gap-2 transition">
+                <Plus size={16} /> Nuovo colloquio
+              </button>
             </div>
-            <div className="space-y-3">
-              {candidates.slice(0, 6).map((c, idx) => (
-                <div key={c.id} className="flex items-center justify-between p-4 bg-[#09090b] rounded-xl border border-[#27272a] hover:border-indigo-500/40 transition">
-                  <div className="flex items-center gap-4"><div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold">{c.name?.charAt(0) || '?'}</div><div><div className="font-medium text-white">{c.name || 'Candidato senza nome'}</div><div className="text-xs text-[#71717a]">{c.email}</div></div></div>
-                  <div className="text-right"><div className="text-indigo-400 text-xs font-semibold">{idx % 3 === 0 && 'Oggi, 15:30'}{idx % 3 === 1 && 'Domani, 10:00'}{idx % 3 === 2 && '12 Mag, 14:00'}</div><div className="text-[10px] text-[#71717a]">Colloquio tecnico</div></div>
+
+            {/* Barra filtri colloqui */}
+            <div className="flex gap-3 mb-6">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#71717a]" size={15} />
+                <input
+                  type="text"
+                  placeholder="Cerca per nome o email candidato..."
+                  value={interviewSearchTerm}
+                  onChange={e => setInterviewSearchTerm(e.target.value)}
+                  className="w-full bg-[#09090b] border border-[#27272a] py-2.5 pl-9 pr-4 rounded-xl text-sm outline-none focus:border-indigo-500 transition-all text-white"
+                />
+              </div>
+              <select
+                value={interviewTypeFilter}
+                onChange={e => setInterviewTypeFilter(e.target.value)}
+                className="bg-[#09090b] border border-[#27272a] text-sm text-[#a1a1aa] py-2.5 px-4 rounded-xl outline-none focus:border-indigo-500 transition-all"
+              >
+                <option value="">Tutti i tipi</option>
+                <option value="Colloquio tecnico">Colloquio tecnico</option>
+                <option value="Colloquio HR">Colloquio HR</option>
+                <option value="Colloquio conoscitivo">Colloquio conoscitivo</option>
+                <option value="Colloquio finale">Colloquio finale</option>
+              </select>
+              {(interviewSearchTerm !== '' || interviewTypeFilter !== '') && (
+                <button
+                  onClick={() => { setInterviewSearchTerm(''); setInterviewTypeFilter(''); }}
+                  className="text-[#a1a1aa] hover:text-white bg-[#09090b] border border-[#27272a] px-3 rounded-xl flex items-center gap-1.5 text-xs transition-all hover:border-indigo-500/50"
+                >
+                  <X size={13} /> Reset
+                </button>
+              )}
+            </div>
+
+            {allInterviews.length === 0 ? (
+              <div className="text-center text-[#71717a] py-12">
+                Nessun colloquio programmato. Aggiungine uno!
+              </div>
+            ) : filteredInterviews.length === 0 ? (
+              <div className="text-center text-[#71717a] py-12">
+                Nessun colloquio corrisponde ai filtri selezionati.
+              </div>
+            ) : (
+              <>
+                <div className="space-y-3">
+                  {paginatedInterviews.map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between p-4 bg-[#09090b] rounded-xl border border-[#27272a] hover:border-indigo-500/40 transition group"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold text-sm">
+                          {c.candidateName?.charAt(0) || '?'}
+                        </div>
+                        <div>
+                          <div className="font-medium text-white">{c.candidateName}</div>
+                          <div className="text-xs text-[#71717a]">{c.candidateEmail}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-6">
+                        <div className="text-right">
+                          <div className="text-indigo-400 text-xs font-semibold">{c.time}</div>
+                          <div className="text-[10px] text-[#71717a]">{c.type}</div>
+                        </div>
+                        <button
+                          onClick={() => { setInterviewToDelete(c); setShowDeleteInterviewModal(true); }}
+                          className="p-2 hover:bg-red-500/20 rounded-lg text-[#71717a] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                          title="Cancella colloquio"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-              {candidates.length === 0 && <div className="text-center text-[#71717a] py-12">Nessun colloquio programmato. Aggiungine uno!</div>}
+
+                {/* PAGINAZIONE COLLOQUI */}
+                <Pagination
+                  currentPage={interviewsPage}
+                  totalPages={totalInterviewPages}
+                  onPageChange={setInterviewsPage}
+                  totalItems={filteredInterviews.length}
+                  itemsPerPage={INTERVIEWS_PER_PAGE}
+                />
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ========= MODALE CONFERMA CANCELLAZIONE COLLOQUIO ========= */}
+        {showDeleteInterviewModal && interviewToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+            <div className="bg-[#18181b] border border-[#27272a] rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-500/20 rounded-full">
+                  <Trash2 className="text-red-400" size={24} />
+                </div>
+                <h3 className="text-xl font-bold text-white">Cancella colloquio</h3>
+              </div>
+              <p className="text-[#a1a1aa] mb-2">
+                Sei sicuro di voler cancellare il colloquio con <span className="font-bold text-white">{interviewToDelete.candidateName}</span>?
+              </p>
+              <p className="text-xs text-[#71717a] mb-6">
+                {interviewToDelete.time} — {interviewToDelete.type}
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => { setShowDeleteInterviewModal(false); setInterviewToDelete(null); }}
+                  className="px-4 py-2 rounded-xl bg-[#27272a] hover:bg-[#3f3f46] text-white transition"
+                >
+                  Annulla
+                </button>
+                <button
+                  onClick={handleDeleteInterview}
+                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-medium transition flex items-center gap-2"
+                >
+                  <Trash2 size={15} /> Conferma cancellazione
+                </button>
+              </div>
             </div>
           </div>
         )}

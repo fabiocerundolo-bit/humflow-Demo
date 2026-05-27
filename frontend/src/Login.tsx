@@ -38,7 +38,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-100 to-white">
       <div className="bg-white p-8 rounded-2xl shadow-xl w-96 border border-gray-100">
         <div className="text-center mb-6">
-          <h1 className="text-3xl font-bold text-indigo-700">FluxHR</h1>
+          <h1 className="text-3xl font-bold text-indigo-700">humflow</h1>
           <p className="text-gray-500 mt-1">Accedi per continuare</p>
         </div>
         <form onSubmit={handleSubmit}>
@@ -71,7 +71,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             {loading ? 'Accesso in corso...' : 'Accedi'}
           </button>
         </form>
-        {/* BUG #8 FIXED: il suggerimento mostrava "fluxhr2025" come password demo,
+        {/* BUG #8 FIXED: il suggerimento mostrava "humflow2025" come password demo,
             ma l'hash bcrypt in auth.py corrisponde a "password". */}
         <p className="text-center text-gray-400 text-xs mt-6">
           Credenziali demo: admin / password
